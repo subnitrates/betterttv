@@ -1,5 +1,5 @@
 import debounce from 'lodash.debounce';
-import {PlatformTypes} from '../../constants.js';
+import {ChatLayoutTypes, PlatformTypes, SettingIds} from '../../constants.js';
 import formatMessage from '../../i18n/index.js';
 import domObserver from '../../observers/dom.js';
 import storage from '../../storage.js';
@@ -7,6 +7,7 @@ import {loadModuleForPlatforms} from '../../utils/modules.js';
 import watcher from '../../watcher.js';
 import chatFontSettings from '../chat_font_settings/index.js';
 import settings from '../settings/index.js';
+import bttvSettings from '../../settings.js';
 
 const CHAT_SETTINGS_SELECTOR = '.chat-settings__content';
 const MOD_VIEW_PAGE_SELECTOR = '.moderation-view-page';
@@ -43,7 +44,13 @@ function createRow(className, leftLabel, onClick, rightLabel = null) {
   return container;
 }
 
-function createSettings(onFontFamilyClick, onFontSizeClick, onClearChatClick, onSettingsClick) {
+function createSettings(
+  onFontFamilyClick,
+  onFontSizeClick,
+  onClearChatClick,
+  onSettingsClick,
+  onToggleChatPositionClick
+) {
   const container = document.createElement('div');
   container.classList.add(BTTV_CHAT_SETTINGS_CLASS);
 
@@ -70,6 +77,17 @@ function createSettings(onFontFamilyClick, onFontSizeClick, onClearChatClick, on
       formatMessage({defaultMessage: 'Set Font Size'}),
       onFontSizeClick,
       chatFontSize != null && chatFontSize !== '' ? `${chatFontSize}px` : null
+    )
+  );
+  const currentLayout = bttvSettings.get(SettingIds.CHAT_LAYOUT);
+  container.appendChild(
+    createRow(
+      'toggleChatPosition',
+      formatMessage({defaultMessage: 'Chat Layout'}),
+      onToggleChatPositionClick,
+      currentLayout === ChatLayoutTypes.LEFT
+        ? formatMessage({defaultMessage: 'Left'})
+        : formatMessage({defaultMessage: 'Right'})
     )
   );
   container.appendChild(createRow('clearChat', formatMessage({defaultMessage: 'Clear My Chat'}), onClearChatClick));
@@ -143,6 +161,12 @@ const renderChatSettings = debounce(
           settings.openSettings();
           document.querySelector('button[data-test-selector="chat-settings-close-button-selector"]')?.click?.();
           document.querySelector('button[aria-expanded="true"]')?.click?.();
+        },
+        () => {
+          const currentLayout = bttvSettings.get(SettingIds.CHAT_LAYOUT);
+          const newLayout = currentLayout === ChatLayoutTypes.LEFT ? ChatLayoutTypes.RIGHT : ChatLayoutTypes.LEFT;
+          bttvSettings.set(SettingIds.CHAT_LAYOUT, newLayout);
+          renderChatSettings();
         }
       )
     );
