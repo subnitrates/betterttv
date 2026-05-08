@@ -1,38 +1,40 @@
 import React from 'react';
 import useStorageState from '../../../common/hooks/StorageState.jsx';
-import emoteMenuViewStore from '../../../common/stores/emote-menu-view-store.js';
+import {EMOTE_MENU_MIN_WIDTH} from '../../../common/stores/emote-menu-view-store.js';
 import {SettingIds} from '../../../constants.js';
 
-const MIN_WIDTH = 300;
 const WINDOW_HORIZONTAL_MARGIN = 20;
 
-export default function useHorizontalResize({boundingQuerySelector, handleRef, reposition}) {
+export default function useHorizontalResize({
+  boundingQuerySelector,
+  handleRef,
+  minWidth = EMOTE_MENU_MIN_WIDTH,
+  open = true,
+}) {
   const [emoteMenuWidth, setEmoteMenuWidth] = useStorageState(SettingIds.EMOTE_MENU_WIDTH); // desired width
   const [displayWidth, setDisplayWidth] = React.useState(emoteMenuWidth); // actual width
   const [isResizing, setIsResizing] = React.useState(false);
 
-  React.useEffect(() => {
-    emoteMenuViewStore.updateTotalColumns(displayWidth);
-  }, []);
-
   function setWidth(width, windowResize = false) {
     let newWidth = width;
-    if (newWidth < MIN_WIDTH) {
-      newWidth = MIN_WIDTH;
+    if (newWidth < minWidth) {
+      newWidth = minWidth;
     }
     const maxWidth = window.innerWidth - WINDOW_HORIZONTAL_MARGIN;
     if (newWidth > maxWidth) {
       newWidth = maxWidth;
     }
     if (!windowResize) {
-      setEmoteMenuWidth(newWidth);
+      setEmoteMenuWidth(Math.floor(newWidth));
     }
     setDisplayWidth(newWidth);
-    emoteMenuViewStore.updateTotalColumns(newWidth);
-    reposition();
   }
 
   React.useEffect(() => {
+    if (!open) {
+      setIsResizing(false);
+    }
+
     const currentRef = handleRef.current;
     if (currentRef == null) {
       return;
@@ -60,10 +62,10 @@ export default function useHorizontalResize({boundingQuerySelector, handleRef, r
     // eslint-disable-next-line consistent-return
     return () => {
       currentRef.removeEventListener('mousedown', handleResizeStart);
-      document.addEventListener('mouseup', handleResizeEnd);
+      document.removeEventListener('mouseup', handleResizeEnd);
       window.removeEventListener('resize', handleWindowResize);
     };
-  }, [handleRef, emoteMenuWidth]);
+  }, [handleRef, emoteMenuWidth, open]);
 
   React.useEffect(() => {
     function handleResizeMove(e) {

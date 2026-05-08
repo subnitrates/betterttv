@@ -1,44 +1,32 @@
-import * as faSearch from '@fortawesome/free-solid-svg-icons/faSearch';
-import * as faTimes from '@fortawesome/free-solid-svg-icons/faTimes';
-import {Icon} from '@rsuite/icons';
-import React, {useEffect, useRef} from 'react';
-import IconButton from 'rsuite/IconButton';
-import Input from 'rsuite/Input';
-import InputGroup from 'rsuite/InputGroup';
-import FontAwesomeSvgIcon from '../../../common/components/FontAwesomeSvgIcon.jsx';
+import React, {useCallback} from 'react';
 import formatMessage from '../../../i18n/index.js';
+import {CloseButton, TextInput} from '@mantine/core';
 import styles from './Header.module.css';
+import classNames from 'classnames';
+import LogoIcon from '../../../common/components/LogoIcon.jsx';
+import settings from '../../settings/index.js';
 
-function Header({value, onChange, toggleWhisper, selected, ...props}) {
-  const searchInputRef = useRef(null);
-
-  useEffect(() => {
-    const currentSearchInputRef = searchInputRef.current;
-    if (currentSearchInputRef == null) {
-      return;
-    }
-    document.activeElement.blur();
-    setTimeout(() => currentSearchInputRef.focus(), 1);
-  }, []);
+function Header({value, opened, onChange, toggleWhisper, selected, className, focusRef, ...props}) {
+  const handleLogoClick = useCallback(() => {
+    settings.openSettings();
+    toggleWhisper();
+  }, [toggleWhisper]);
 
   return (
-    <div {...props}>
-      <InputGroup>
-        <InputGroup.Addon className={styles.searchPrefix}>
-          <Icon as={FontAwesomeSvgIcon} fontAwesomeIcon={faSearch} />
-        </InputGroup.Addon>
-        <Input
-          placeholder={selected == null ? formatMessage({defaultMessage: 'Search for Emotes'}) : selected.code}
-          value={value}
-          onChange={onChange}
-          inputRef={searchInputRef}
-        />
-      </InputGroup>
-      <IconButton
-        icon={<Icon as={FontAwesomeSvgIcon} fontAwesomeIcon={faTimes} />}
-        appearance="subtle"
-        onClick={toggleWhisper}
+    <div className={classNames(styles.header, className)} {...props}>
+      <button color="primary" variant="subtle" className={styles.logoButton} onClick={handleLogoClick}>
+        <LogoIcon className={styles.logoIcon} />
+      </button>
+      <TextInput
+        ref={focusRef}
+        size="md"
+        placeholder={selected == null ? formatMessage({defaultMessage: 'Search for Emotes'}) : selected.code}
+        value={value}
+        onChange={({target: {value}}) => onChange(value)}
+        radius="md"
+        classNames={{input: styles.input, root: styles.root}}
       />
+      <CloseButton className={styles.closeButton} size="lg" onClick={toggleWhisper} />
     </div>
   );
 }
@@ -46,7 +34,8 @@ function Header({value, onChange, toggleWhisper, selected, ...props}) {
 export default React.memo(
   Header,
   (oldProps, newProps) =>
+    oldProps.value === newProps.value &&
     oldProps.selected === newProps.selected &&
-    newProps.value === oldProps.value &&
-    newProps.toggleWhisper === oldProps.toggleWhisper
+    newProps.toggleWhisper === oldProps.toggleWhisper &&
+    newProps.opened === oldProps.opened
 );

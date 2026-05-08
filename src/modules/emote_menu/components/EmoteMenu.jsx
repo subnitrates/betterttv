@@ -1,126 +1,343 @@
-import React, {useCallback, useEffect, useState} from 'react';
-import Divider from 'rsuite/Divider';
-import useEmoteMenuViewStoreUpdated from '../../../common/hooks/EmoteMenuViewStore.jsx';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import emoteMenuViewStore, {CategoryPositions} from '../../../common/stores/emote-menu-view-store.js';
-import {EmoteMenuTips} from '../../../constants.js';
-import keycodes from '../../../utils/keycodes.js';
-import styles from './EmoteMenu.module.css';
-import Emotes from './Emotes.jsx';
+import {EMOTE_MENU_GRID_ROW_HEIGHT, EmoteMenuTips, NavigationModeTypes} from '../../../constants.js';
+import useHorizontalResize from '../hooks/HorizontalResize.jsx';
 import Header from './Header.jsx';
-import Preview from './Preview.jsx';
 import Sidebar from './Sidebar.jsx';
 import Tip, {markTipAsSeen} from './Tip.jsx';
+import styles from './EmoteMenu.module.css';
+import EmoteList from './EmoteList.jsx';
+import keyCodes from '../../../utils/keycodes.js';
+import {useDisclosure, useFocusTrap} from '@mantine/hooks';
+import {autoUpdate, offset, useDismiss, useFloating, useInteractions} from '@floating-ui/react';
+import {isMac} from '../../../utils/window.js';
+import useEmoteMenuViewStoreUpdated from '../../../common/hooks/EmoteMenuViewStore.jsx';
+import {ScrollbarSizeTargetContext} from '../../../common/components/Scrollbar.jsx';
+import {
+  getCoordsOfSelected,
+  getFirstCoords,
+  getFirstCoordsInCategory,
+  getSelectedAtCoords,
+} from '../utils/emote-list-grid.js';
+import classNames from 'classnames';
 
 let keyPressCallback;
 function setKeyPressCallback(newKeyPressCallback) {
   keyPressCallback = newKeyPressCallback;
 }
 
-export default function EmoteMenu({toggleWhisper, appendToChat, onSetTip}) {
-  const [search, setSearch] = useState('');
+function getCategories() {
+  return {
+    top: emoteMenuViewStore.getCategories(CategoryPositions.TOP),
+    middle: emoteMenuViewStore.getCategories(CategoryPositions.MIDDLE),
+    bottom: emoteMenuViewStore.getCategories(CategoryPositions.BOTTOM),
+  };
+}
+
+function EmoteMenu({
+  setHandleOpen,
+  appendToChat,
+  boundingQuerySelector,
+  offsetOptions = {},
+  emoteMenuToggleButtonSelector,
+}) {
+  const handleRef = useRef(null);
+  const emoteMenuContentRef = useRef(null);
   const [selected, setSelected] = useState(null);
-  const [, setUpdated] = useState(false);
-  const [altPressed, setAltPressed] = useState(false);
-  const [shiftPressed, setShiftPressed] = useState(false);
-  const [section, setSection] = useState({
-    eventKey: null,
-    scrollTo: false,
+  const altPressed = useRef(false);
+  const shiftPressed = useRef(false);
+  const [section, setSection] = useState(null);
+  const [opened, {close, open}] = useDisclosure(false);
+  const width = useHorizontalResize({boundingQuerySelector, handleRef, open: opened});
+  const emoteListRef = useRef(null);
+  const [emoteListCoords, setEmoteListCoords] = useState({x: 0, y: 0});
+  const [navigationMode, setNavigationMode] = useState(NavigationModeTypes.ARROW_KEYS);
+  const focusRef = useFocusTrap(opened && navigationMode === NavigationModeTypes.ARROW_KEYS);
+
+  const [emoteListData, setEmoteListData] = useState({
+    search: '',
+    rows: [],
+    totalCols: emoteMenuViewStore.totalCols,
+    categories: getCategories(),
   });
 
-  const handleClick = useCallback(
-    (emote) => {
-      if (altPressed) {
-        emoteMenuViewStore.toggleFavorite(emote);
-        markTipAsSeen(EmoteMenuTips.EMOTE_MENU_FAVORITE_EMOTE);
+  const emoteListDataRef = useRef(emoteListData);
+
+  const handleCoordsChange = useCallback(
+    (newCoords) => {
+      const currentEmoteListData = emoteListDataRef.current;
+      if (currentEmoteListData.rows.length === 0) {
         return;
       }
 
-      if (emote.metadata?.isLocked?.() ?? false) {
-        return;
+      if (newCoords == null) {
+        newCoords = getFirstCoords(currentEmoteListData.rows);
       }
 
-      appendToChat(emote, !shiftPressed);
-      emoteMenuViewStore.trackHistory(emote);
-
-      if (shiftPressed) {
-        markTipAsSeen(EmoteMenuTips.EMOTE_MENU_PREVENT_CLOSE);
-        return;
+      const selected = getSelectedAtCoords(currentEmoteListData.rows, newCoords);
+      if (section == null && selected != null) {
+        setSection(selected.category.id);
       }
 
-      toggleWhisper();
+      setSelected(selected);
+      setEmoteListCoords(newCoords);
     },
-    [altPressed, shiftPressed, toggleWhisper]
+    [setSelected, setEmoteListCoords, section]
   );
 
-  useEffect(() => {
-    function buttonPressCallback(event) {
-      setAltPressed(event.altKey);
-      setShiftPressed(event.shiftKey);
+  const {refs, floatingStyles, context} = useFloating({
+    strategy: 'fixed',
+    open: opened,
+    onOpenChange: (isOpen) => (isOpen ? handleOpen() : handleClose()),
+    placement: 'top-end',
+    middleware: [offset(offsetOptions)],
+    whileElementsMounted: autoUpdate,
+  });
+
+  const dismiss = useDismiss(context, {
+    outsidePress(event) {
+      if (emoteMenuToggleButtonSelector == null || emoteMenuToggleButtonSelector.length === 0) {
+        return true;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return true;
+      }
+
+      return target.closest(emoteMenuToggleButtonSelector) == null;
+    },
+  });
+
+  const {getFloatingProps} = useInteractions([dismiss]);
+
+  const handleOpen = useCallback(() => {
+    open();
+
+    const chatTextArea = document.querySelector(boundingQuerySelector);
+    refs.setPositionReference(chatTextArea);
+  }, [open, boundingQuerySelector, refs]);
+
+  const handleScrollToPendingRow = useCallback((pendingScrollRowIndex) => {
+    const listEl = emoteListRef.current;
+    if (listEl == null) {
+      return;
     }
 
-    function callback(event) {
-      buttonPressCallback(event);
+    const currentEmoteListData = emoteListDataRef.current;
+    if (currentEmoteListData.rows.length === 0) {
+      return;
+    }
 
-      if (event.key === keycodes.Enter) {
-        event.preventDefault();
+    const scrollTop = pendingScrollRowIndex * EMOTE_MENU_GRID_ROW_HEIGHT + 1;
+    listEl.scrollTo(0, scrollTop);
+  }, []);
+
+  const updateEmoteListData = useCallback((currentSearch = '') => {
+    let rows = emoteMenuViewStore.rows;
+
+    if (currentSearch.length > 0) {
+      rows = emoteMenuViewStore.search(currentSearch);
+    }
+
+    const newData = {
+      rows,
+      search: currentSearch,
+      totalCols: emoteMenuViewStore.totalCols,
+      categories: getCategories(),
+    };
+
+    setEmoteListData(newData);
+    emoteListDataRef.current = newData;
+
+    return newData;
+  }, []);
+
+  const handleClose = useCallback(() => {
+    const listEl = emoteListRef.current;
+    if (listEl != null) {
+      listEl.scrollTo(0, 0);
+    }
+
+    close();
+    setNavigationMode(NavigationModeTypes.ARROW_KEYS);
+    updateEmoteListData('');
+    setSection(null);
+    handleCoordsChange(null);
+  }, [updateEmoteListData, handleCoordsChange, setSection, close, setNavigationMode]);
+
+  const toggle = useCallback(() => (opened ? handleClose() : handleOpen()), [opened, handleClose, handleOpen]);
+
+  const handleEmoteMenuViewStoreUpdate = useCallback(
+    (newData) => {
+      const parsedData = updateEmoteListData(newData);
+
+      let newCoords = getCoordsOfSelected(parsedData.rows, selected);
+      if (newCoords == null) {
+        newCoords = getFirstCoords(parsedData.rows);
+      }
+
+      handleCoordsChange(newCoords);
+    },
+    [selected, handleCoordsChange, updateEmoteListData]
+  );
+
+  useEmoteMenuViewStoreUpdated(opened, handleEmoteMenuViewStoreUpdate);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const isPressed =
+        (event.altKey && event.key === keyCodes.E) || (isMac() && event.ctrlKey && event.key === keyCodes.E);
+      if (!isPressed) {
+        return;
+      }
+
+      event.preventDefault();
+      toggle();
+      markTipAsSeen(EmoteMenuTips.EMOTE_MENU_HOTKEY);
+    }
+
+    setHandleOpen(toggle);
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [toggle]);
+
+  const handleCloseRef = useRef(handleClose);
+  useEffect(() => {
+    handleCloseRef.current = handleClose;
+  }, [handleClose]);
+
+  const handleClick = useCallback((emote) => {
+    if (altPressed.current) {
+      emoteMenuViewStore.toggleFavorite(emote);
+      markTipAsSeen(EmoteMenuTips.EMOTE_MENU_FAVORITE_EMOTE);
+      return;
+    }
+
+    if (emote.metadata?.isLocked?.() ?? false) {
+      return;
+    }
+
+    appendToChat(emote, !shiftPressed.current);
+    emoteMenuViewStore.trackHistory(emote);
+
+    if (shiftPressed.current) {
+      markTipAsSeen(EmoteMenuTips.EMOTE_MENU_PREVENT_CLOSE);
+      return;
+    }
+
+    handleCloseRef.current();
+  }, []);
+
+  const handleKeyEvent = useCallback((event) => {
+    altPressed.current = event.altKey;
+    shiftPressed.current = event.shiftKey;
+  }, []);
+
+  const {onKeyDown, ...restProps} = getFloatingProps();
+
+  const handleKeyDown = useCallback(
+    (event) => {
+      onKeyDown(event);
+      handleKeyEvent(event);
+
+      /* Events like keydown are sometimes prevented by twitch,
+      likely because it can't locate the focused element inside the shadow dom.
+      To prevent this we stop it from bubbling upstream */
+      event.stopPropagation();
+
+      if (event.key === keyCodes.Enter) {
         handleClick(selected);
         return;
       }
 
-      keyPressCallback(event, shiftPressed);
-    }
+      keyPressCallback(event, shiftPressed.current);
+    },
+    [handleClick, keyPressCallback, selected]
+  );
 
-    document.addEventListener('keydown', callback, false);
-    document.addEventListener('keyup', buttonPressCallback, false);
+  const handleSection = useCallback(
+    (eventKey, shouldScroll = true) => {
+      const parsedData = updateEmoteListData('');
+      setSection(eventKey);
 
-    return () => {
-      document.removeEventListener('keydown', callback, false);
-      document.removeEventListener('keyup', buttonPressCallback, false);
-    };
-  }, [selected, shiftPressed]);
+      const index = emoteMenuViewStore.getCategoryIndexById(eventKey);
+      if (index == null || !shouldScroll) {
+        return;
+      }
 
-  useEmoteMenuViewStoreUpdated(true, () => setUpdated((prev) => !prev));
-  useEffect(() => {
-    setSearch('');
-  }, [section]);
+      const firstInCategory = getFirstCoordsInCategory(parsedData.rows, eventKey);
+      if (firstInCategory != null) {
+        handleCoordsChange(firstInCategory);
+      }
+
+      handleScrollToPendingRow(index);
+    },
+    [updateEmoteListData, handleScrollToPendingRow, handleCoordsChange]
+  );
+
+  const onSection = useCallback((eventKey) => handleSection(eventKey, false), [handleSection]);
+  const style = useMemo(() => ({...floatingStyles, width}), [floatingStyles, width]);
+
+  const handleSearchChange = useCallback(
+    (search) => {
+      handleScrollToPendingRow(0);
+      setNavigationMode(NavigationModeTypes.ARROW_KEYS);
+      const parsedData = updateEmoteListData(search);
+      handleCoordsChange(getFirstCoords(parsedData.rows));
+    },
+    [updateEmoteListData, handleCoordsChange, handleScrollToPendingRow]
+  );
 
   return (
-    <>
-      <Header
-        className={styles.header}
-        value={search}
-        onChange={setSearch}
-        toggleWhisper={toggleWhisper}
-        selected={selected}
-      />
-      <Divider className={styles.divider} />
-      <div className={styles.contentContainer}>
-        <Sidebar
-          className={styles.sidebar}
-          section={section}
-          onClick={(eventKey) => setSection({eventKey, scrollTo: true})}
-          categories={{
-            top: emoteMenuViewStore.getCategories(CategoryPositions.TOP),
-            middle: emoteMenuViewStore.getCategories(CategoryPositions.MIDDLE),
-            bottom: emoteMenuViewStore.getCategories(CategoryPositions.BOTTOM),
-          }}
-        />
-        <div className={styles.content}>
-          <Emotes
+    <div
+      ref={refs.setFloating}
+      className={classNames(styles.emoteMenu, {[styles.hidden]: !opened})}
+      style={style}
+      onKeyDown={handleKeyDown}
+      onKeyUp={handleKeyEvent}
+      {...restProps}>
+      <ScrollbarSizeTargetContext.Provider value={emoteMenuContentRef}>
+        <div ref={emoteMenuContentRef} className={styles.emoteMenuContent}>
+          <div ref={handleRef} className={styles.resizeHandle} />
+          <Header
+            focusRef={focusRef}
+            opened={opened}
+            className={styles.header}
+            value={emoteListData.search}
+            onChange={handleSearchChange}
+            toggleWhisper={toggle}
+            selected={selected}
+          />
+          <Sidebar
+            className={styles.sidebar}
+            section={section}
+            onClick={handleSection}
+            categories={emoteListData.categories}
+          />
+          <EmoteList
+            data={emoteListData}
+            ref={emoteListRef}
+            selected={selected}
             className={styles.emotes}
-            search={search}
             section={section}
             onClick={handleClick}
             setKeyPressCallback={setKeyPressCallback}
-            rows={emoteMenuViewStore.rows}
-            setSelected={setSelected}
-            onSection={(eventKey) => setSection({eventKey, scrollTo: false})}
+            onSection={onSection}
+            navigationMode={navigationMode}
+            setNavigationMode={setNavigationMode}
+            coords={emoteListCoords}
+            setCoords={handleCoordsChange}
           />
-          <Divider className={styles.divider} />
-          <Preview emote={selected} isFavorite={selected == null ? false : emoteMenuViewStore.hasFavorite(selected)} />
         </div>
-      </div>
-      <Tip classname={styles.tip} onSetTip={onSetTip} />
-    </>
+      </ScrollbarSizeTargetContext.Provider>
+      {opened ? <Tip className={styles.tip} onClose={handleClose} /> : null}
+    </div>
   );
 }
+
+export default EmoteMenu;

@@ -1,4 +1,5 @@
 import Fuse from 'fuse.js';
+import chunk from 'lodash.chunk';
 import sortBy from 'lodash.sortby';
 import uniqBy from 'lodash.uniqby';
 import {
@@ -85,8 +86,9 @@ let topCategories = [];
 let middleCategories = [];
 let bottomCategories = [];
 
-const EMOTE_MENU_WINDOW_MARGIN = 64;
+const EMOTE_MENU_WINDOW_MARGIN = 16;
 const EMOTE_MENU_COLUMN_WIDTH = 36;
+export const EMOTE_MENU_MIN_WIDTH = 300;
 
 class EmoteMenuViewStore extends SafeEventEmitter {
   constructor() {
@@ -108,11 +110,19 @@ class EmoteMenuViewStore extends SafeEventEmitter {
   }
 
   updateTotalColumns(width = 300) {
+    let cols;
+
     if (window.innerWidth < width) {
-      this.totalCols = Math.floor((window.innerWidth - EMOTE_MENU_WINDOW_MARGIN) / EMOTE_MENU_COLUMN_WIDTH);
+      cols = Math.floor((window.innerWidth - EMOTE_MENU_WINDOW_MARGIN) / EMOTE_MENU_COLUMN_WIDTH);
     } else {
-      this.totalCols = Math.floor((width - EMOTE_MENU_WINDOW_MARGIN) / EMOTE_MENU_COLUMN_WIDTH);
+      cols = Math.floor((width - EMOTE_MENU_WINDOW_MARGIN) / EMOTE_MENU_COLUMN_WIDTH);
     }
+
+    if (this.totalCols === cols) {
+      return;
+    }
+
+    this.totalCols = Math.max(1, cols);
     this.markDirty(false);
   }
 
@@ -241,12 +251,15 @@ class EmoteMenuViewStore extends SafeEventEmitter {
     this.markDirty(false);
   }
 
-  search(search) {
+  search(search, chunkResults = true) {
     if (search == null || search.length === 0) {
       return [];
     }
 
-    return fuse.search(search);
+    const results = fuse.search(search);
+    const items = results.map(({item}) => item);
+
+    return chunkResults ? chunk(items, this.totalCols) : items;
   }
 
   updateEmotes() {
@@ -285,11 +298,13 @@ class EmoteMenuViewStore extends SafeEventEmitter {
     for (const category of [...categories, ...emojiCategories]) {
       for (const emote of category.emotes) {
         const emoteCanonicalId = emote.canonicalId;
+
         if (emoteStorage.favorites.includes(emoteCanonicalId)) {
-          favorites.emotes.push(emote);
+          favorites.emotes.push({...emote, category: favorites.category, canonicalId: emoteCanonicalId});
         }
+
         if (emoteStorage.frecents.includes(emoteCanonicalId)) {
-          frecents.emotes.push(emote);
+          frecents.emotes.push({...emote, category: frecents.category, canonicalId: emoteCanonicalId});
         }
       }
 

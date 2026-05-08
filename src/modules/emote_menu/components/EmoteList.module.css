@@ -1,0 +1,32 @@
+.emoteListRoot {
+  display: flex;
+  flex-direction: column;
+}
+
+.listViewport {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.emotesContainer {
+  flex: 1;
+  width: 100%;
+  overflow-y: scroll;
+  overflow-x: hidden;
+}
+
+.empty {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  row-gap: 8px;
+  justify-content: center;
+
+  .emptyIcon {
+    width: 24px;
+    height: 24px;
+  }
+}

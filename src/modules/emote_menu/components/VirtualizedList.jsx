@@ -1,92 +1,125 @@
 import classNames from 'classnames';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import styles from './VirtualizedList.module.css';
+import throttle from 'lodash.throttle';
+import {useElementSize, useMergedRef} from '@mantine/hooks';
+import {useScrollbarSize} from '../../../common/components/Scrollbar.jsx';
 
 function VirtualizedList(
-  {className, totalRows, rowHeight, renderRow, windowHeight, stickyRows = [], onHeaderChange = () => {}},
-  ref
+  {
+    className,
+    totalRows,
+    rowHeight,
+    renderRow,
+    stickyRows,
+    onHeaderChange = () => {},
+    bottomGuardHeight = 0,
+    topGuardHeight = 0,
+    overscanCount = 10,
+    ...props
+  },
+  forwardedRef
 ) {
-  const listHeight = useMemo(() => rowHeight * totalRows, [totalRows, rowHeight]);
+  const wrapperRef = useRef(null);
+  const {ref: sizeRef, height: windowHeight} = useElementSize(null);
+  const mergedRef = useMergedRef(forwardedRef, sizeRef, wrapperRef);
+  const headerIndex = useRef(null);
+  useScrollbarSize(wrapperRef);
 
-  const [data, setData] = useState({
-    top: 0,
-    rows: [],
-    headerIndex: null,
-  });
+  const listHeight = useMemo(
+    () => Math.max(rowHeight * totalRows + topGuardHeight + bottomGuardHeight, windowHeight),
+    [totalRows, rowHeight, windowHeight, topGuardHeight, bottomGuardHeight]
+  );
+
+  const handleViewportUpdate = useCallback(
+    (scrollTop = 0) => {
+      const scrollBottom = scrollTop + windowHeight;
+      const startIndex = Math.floor(scrollTop / rowHeight);
+      const endIndex = Math.min(totalRows - 1, Math.floor(scrollBottom / rowHeight));
+
+      let stickyRowIndex;
+      for (const rowIndex of stickyRows ?? []) {
+        if (rowIndex > startIndex) {
+          break;
+        }
+        stickyRowIndex = rowIndex;
+      }
+
+      const hasAdditionalStickyRow = stickyRowIndex != null && stickyRowIndex < startIndex;
+      const hasCollapsedGap = hasAdditionalStickyRow && startIndex > stickyRowIndex + 1;
+
+      const renderEnd = Math.min(totalRows - 1, endIndex + overscanCount);
+
+      let renderStart = Math.max(0, startIndex - overscanCount);
+      if (hasAdditionalStickyRow) {
+        renderStart = Math.max(stickyRowIndex + 1, renderStart);
+      }
+
+      if (hasCollapsedGap && startIndex - overscanCount > stickyRowIndex + 1) {
+        renderStart = startIndex;
+      }
+
+      const rowsVisible = [];
+      if (hasAdditionalStickyRow) {
+        rowsVisible.push(stickyRowIndex);
+      }
+
+      for (let i = renderStart; i <= renderEnd; i++) {
+        rowsVisible.push(i);
+      }
+
+      let top = renderStart * rowHeight;
+
+      if (hasAdditionalStickyRow && hasCollapsedGap && renderStart < startIndex) {
+        top = stickyRowIndex * rowHeight;
+      } else if (hasAdditionalStickyRow) {
+        top = (startIndex - 1) * rowHeight;
+      }
+
+      return {rows: rowsVisible, top, headerIndex: stickyRowIndex};
+    },
+    [totalRows, rowHeight, windowHeight, stickyRows, overscanCount, onHeaderChange]
+  );
+
+  const [data, setData] = useState(handleViewportUpdate(0));
+
+  const handleScroll = useCallback(() => {
+    const currentWrapperRef = wrapperRef.current;
+    const scrollTop = currentWrapperRef?.scrollTop ?? 0;
+
+    const {rows, top, headerIndex: newHeaderIndex} = handleViewportUpdate(scrollTop);
+
+    if (headerIndex.current != null && headerIndex.current !== newHeaderIndex) {
+      onHeaderChange(newHeaderIndex);
+    }
+
+    headerIndex.current = newHeaderIndex;
+    setData({rows, top, headerIndex: newHeaderIndex});
+  }, [handleViewportUpdate, onHeaderChange]);
 
   useEffect(() => {
-    onHeaderChange(data.headerIndex);
-  }, [data.headerIndex]);
-
-  const wrapperRef = ref || useRef(null);
-
-  const isInViewport = useCallback(() => {
     const currentWrapperRef = wrapperRef.current;
     if (currentWrapperRef == null) {
       return;
     }
-    const {scrollTop} = currentWrapperRef;
-    const scrollBottom = scrollTop + windowHeight;
 
-    const startIndex = Math.floor(scrollTop / rowHeight);
-    const endIndex = Math.min(totalRows - 1, Math.floor(scrollBottom / rowHeight));
+    const throttledCallback = throttle(handleScroll, 50);
 
-    let stickyRowIndex;
-    for (const rowIndex of stickyRows) {
-      if (rowIndex > startIndex) {
-        break;
-      }
-      stickyRowIndex = rowIndex;
-    }
-
-    const rowsVisible = [];
-    const hasAdditionalStickyRow = stickyRowIndex < startIndex;
-    if (hasAdditionalStickyRow) {
-      rowsVisible.push(stickyRowIndex);
-    }
-
-    for (let i = startIndex; i <= endIndex; i++) {
-      rowsVisible.push(i);
-    }
-
-    const indexOffset = hasAdditionalStickyRow ? startIndex - 1 : startIndex;
-    setData({
-      rows: rowsVisible,
-      top: indexOffset * rowHeight,
-      headerIndex: stickyRowIndex,
-    });
-  }, [totalRows, rowHeight, windowHeight, stickyRows]);
-
-  useEffect(() => {
-    const currentWrapperRef = wrapperRef.current;
-    if (currentWrapperRef == null) {
-      return null;
-    }
-    currentWrapperRef.addEventListener('scroll', isInViewport);
-    isInViewport();
-    return () => {
-      currentWrapperRef.removeEventListener('scroll', isInViewport);
-    };
-  }, [isInViewport]);
+    currentWrapperRef.addEventListener('scroll', throttledCallback);
+    return () => currentWrapperRef.removeEventListener('scroll', throttledCallback);
+  }, [handleScroll]);
 
   const rows = useMemo(
-    () =>
-      data.rows.map((value) =>
-        renderRow({
-          key: `row-${value}`,
-          index: value,
-          style: {
-            height: `${rowHeight}px`,
-          },
-        })
-      ),
+    () => data.rows.map((value) => renderRow({key: `row-${value}`, index: value, style: {height: `${rowHeight}px`}})),
     [data.rows, renderRow]
   );
 
   return (
-    <div className={classNames(styles.list, className)} style={{height: windowHeight}} ref={wrapperRef}>
+    <div className={classNames(styles.list, className)} style={{height: windowHeight}} ref={mergedRef} {...props}>
       <div className={styles.rows} style={{top: data.top}}>
+        <div className={styles.guard} style={{height: topGuardHeight}} />
         {rows}
+        <div className={styles.guard} style={{height: bottomGuardHeight}} />
       </div>
       <div className={styles.ghostRows} style={{height: listHeight}} />
     </div>

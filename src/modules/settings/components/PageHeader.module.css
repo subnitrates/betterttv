@@ -1,0 +1,43 @@
+.header {
+  --vertical-padding: 10px;
+  --horizontal-padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--vertical-padding) 12px var(--vertical-padding) 20px;
+  background-color: var(--mantine-color-body-secondary);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  z-index: 10;
+  gap: var(--horizontal-padding);
+}
+
+.closeButton,
+.sidenavToggleButton {
+  min-width: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.closeButton {
+  background-color: transparent;
+  color: var(--mantine-color-dimmed);
+  margin-left: -12px;
+}
+
+.closeButton:hover {
+  background-color: transparent;
+  color: var(--mantine-color-text);
+}
+
+@media (min-width: 800px) {
+  .sidenavToggleButton {
+    display: none;
+  }
+}
+
+.sidenavToggleButtonIcon {
+  width: 20px;
+  height: 20px;
+}

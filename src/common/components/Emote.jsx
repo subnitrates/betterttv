@@ -1,18 +1,17 @@
-import * as faLock from '@fortawesome/free-solid-svg-icons/faLock';
-import {Icon} from '@rsuite/icons';
+import Icon from './Icon.jsx';
 import classNames from 'classnames';
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {EmoteTypeFlags, SettingIds} from '../../constants.js';
 import {hasFlag} from '../../utils/flags.js';
 import {createSrcSet, createSrc, DEFAULT_SIZES} from '../../utils/image.js';
-import useStorageState from '../hooks/StorageState.jsx';
 import styles from './Emote.module.css';
-import FontAwesomeSvgIcon from './FontAwesomeSvgIcon.jsx';
+import {faLock} from '@fortawesome/free-solid-svg-icons';
+import settings from '../../settings.js';
 
 export default function Emote({emote, className, locked, sizes = DEFAULT_SIZES, animating = false}) {
   const imageRef = React.useRef(null);
   const loadingRef = React.useRef(true);
-  const [emotesSettingValue] = useStorageState(SettingIds.EMOTES);
+  const emotesSettingValue = useMemo(() => settings.get(SettingIds.EMOTES), []);
   const [isMouseOver, setIsMouseOver] = useState(false);
 
   function handleLoad() {
@@ -60,7 +59,7 @@ export default function Emote({emote, className, locked, sizes = DEFAULT_SIZES, 
     return (
       <div className={styles.lockedEmote}>
         {image}
-        <Icon as={FontAwesomeSvgIcon} fontAwesomeIcon={faLock} className={styles.lock} />
+        <Icon icon={faLock} className={styles.lockIcon} />
       </div>
     );
   }
